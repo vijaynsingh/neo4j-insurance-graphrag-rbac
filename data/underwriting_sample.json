@@ -3,7 +3,38 @@
     {
       "id": "applicant_001",
       "name": "John Smith",
-      "age": 48
+      "age": 48,
+      "sensitivity": "standard"
+    },
+    {
+      "id": "applicant_002",
+      "name": "Maria Garcia",
+      "age": 52,
+      "sensitivity": "standard"
+    },
+    {
+      "id": "applicant_003",
+      "name": "Robert Chen",
+      "age": 55,
+      "sensitivity": "restricted"
+    },
+    {
+      "id": "applicant_004",
+      "name": "Patricia Williams",
+      "age": 61,
+      "sensitivity": "restricted"
+    },
+    {
+      "id": "applicant_005",
+      "name": "James Hartford",
+      "age": 45,
+      "sensitivity": "confidential"
+    },
+    {
+      "id": "applicant_006",
+      "name": "Victoria Ashworth",
+      "age": 58,
+      "sensitivity": "confidential"
     }
   ],
   "policies": [
@@ -12,6 +43,19 @@
       "name": "Preferred Term Life",
       "type": "Term Life",
       "class_name": "Preferred"
+    },
+    {
+      "id": "policy_002",
+      "name": "Standard Term Life",
+      "type": "Term Life",
+      "class_name": "Standard"
+    },
+    {
+      "id": "policy_003",
+      "name": "Premier Whole Life",
+      "type": "Whole Life",
+      "class_name": "Preferred Elite",
+      "face_value": 5000000
     }
   ],
   "risk_factors": [
@@ -32,6 +76,54 @@
       "name": "Controlled A1C",
       "category": "lab_marker",
       "controlled": true
+    },
+    {
+      "id": "rf_004",
+      "name": "Controlled Hypertension",
+      "category": "chronic_condition",
+      "controlled": true
+    },
+    {
+      "id": "rf_005",
+      "name": "Uncontrolled Type 2 Diabetes",
+      "category": "chronic_condition",
+      "controlled": false
+    },
+    {
+      "id": "rf_006",
+      "name": "Elevated BMI",
+      "category": "lifestyle",
+      "favorable": false
+    },
+    {
+      "id": "rf_007",
+      "name": "Sleep Apnea (CPAP Compliant)",
+      "category": "chronic_condition",
+      "controlled": true
+    },
+    {
+      "id": "rf_008",
+      "name": "Coronary Artery Disease History",
+      "category": "chronic_condition",
+      "controlled": false
+    },
+    {
+      "id": "rf_009",
+      "name": "Active Tobacco Use",
+      "category": "lifestyle",
+      "favorable": false
+    },
+    {
+      "id": "rf_010",
+      "name": "No Significant Medical History",
+      "category": "lifestyle",
+      "favorable": true
+    },
+    {
+      "id": "rf_011",
+      "name": "Executive Annual Health Screening",
+      "category": "lifestyle",
+      "favorable": true
     }
   ],
   "lab_results": [
@@ -41,6 +133,48 @@
       "value": 6.8,
       "unit": "%",
       "reference_range": "below 7.0 is controlled"
+    },
+    {
+      "id": "lab_002",
+      "test_name": "Blood Pressure",
+      "value": 128,
+      "unit": "mmHg systolic",
+      "reference_range": "below 130 is normal"
+    },
+    {
+      "id": "lab_003",
+      "test_name": "A1C",
+      "value": 9.2,
+      "unit": "%",
+      "reference_range": "above 8.0 is poorly controlled"
+    },
+    {
+      "id": "lab_004",
+      "test_name": "BMI",
+      "value": 32.4,
+      "unit": "kg/m²",
+      "reference_range": "18.5–24.9 is normal weight"
+    },
+    {
+      "id": "lab_005",
+      "test_name": "LDL Cholesterol",
+      "value": 148,
+      "unit": "mg/dL",
+      "reference_range": "below 100 mg/dL is optimal"
+    },
+    {
+      "id": "lab_006",
+      "test_name": "Fasting Glucose",
+      "value": 92,
+      "unit": "mg/dL",
+      "reference_range": "below 100 mg/dL is normal fasting"
+    },
+    {
+      "id": "lab_007",
+      "test_name": "Blood Pressure",
+      "value": 136,
+      "unit": "mmHg systolic",
+      "reference_range": "130–139 is Stage 1 hypertension"
     }
   ],
   "underwriting_rules": [
@@ -67,6 +201,54 @@
       "title": "Age and Diabetes Additional Review",
       "text": "Applicants over age 45 with diabetes require additional underwriting review.",
       "decision": "REQUIRE_ADDITIONAL_REVIEW"
+    },
+    {
+      "id": "rule_005",
+      "title": "Hypertension Classification Standard",
+      "text": "Controlled hypertension consistently below 130/85 mmHg on stable single-agent therapy may qualify for Preferred classification pending overall risk assessment. Stage 1 hypertension on dual therapy is reviewed for Standard class.",
+      "decision": "REFER_FOR_REVIEW"
+    },
+    {
+      "id": "rule_006",
+      "title": "Uncontrolled Diabetes Substandard Rating",
+      "text": "Uncontrolled Type 2 Diabetes with A1C of 8.0% or higher results in automatic substandard classification with additional mortality loading. A two-year demonstrated glycemic improvement period is required before Preferred class consideration.",
+      "decision": "SUBSTANDARD_RATING"
+    },
+    {
+      "id": "rule_007",
+      "title": "Elevated BMI Risk Adjustment",
+      "text": "BMI at or above 30.0 kg/m² triggers a mandatory rating table adjustment. BMI between 30.0 and 34.9 typically results in a Table B substandard rating. Combined metabolic risk factors may warrant additional loading.",
+      "decision": "TABLE_RATING_REQUIRED"
+    },
+    {
+      "id": "rule_008",
+      "title": "Sleep Apnea CPAP Compliance Review",
+      "text": "Obstructive Sleep Apnea applicants with documented CPAP compliance (≥4 hours/night on ≥70% of nights) may be considered for Standard class. Non-compliant or untreated OSA is rated substandard or declined based on severity index.",
+      "decision": "REFER_FOR_REVIEW"
+    },
+    {
+      "id": "rule_009",
+      "title": "Active Tobacco Use Disqualification",
+      "text": "Active tobacco use within the past 12 months disqualifies applicants from Preferred and Standard non-tobacco classifications. Tobacco users are rated at smoker rates with 2x to 3x mortality loading. Twelve consecutive months of cessation verified by cotinine testing is required before reclassification.",
+      "decision": "SMOKER_RATING_REQUIRED"
+    },
+    {
+      "id": "rule_010",
+      "title": "Coronary Artery Disease History Underwriting",
+      "text": "Prior myocardial infarction, CABG, or PCI requires a full cardiac underwriting workup. Applications within 5 years of a cardiac event are typically postponed or declined. Cases beyond 5 years with normal stress testing and ejection fraction ≥50% may be considered at substandard rates.",
+      "decision": "POSTPONE_OR_DECLINE"
+    },
+    {
+      "id": "rule_011",
+      "title": "High-Value Policy Underwriting Threshold",
+      "text": "Policies with a face value exceeding $2,000,000 require mandatory senior underwriter sign-off and an independent attending physician statement (APS). Financial justification documentation, including tax returns or estate valuation, must accompany the application.",
+      "decision": "REQUIRE_SENIOR_REVIEW"
+    },
+    {
+      "id": "rule_012",
+      "title": "Confidential High-Net-Worth Client Protocol",
+      "text": "Applicants with policy face value of $5,000,000 or greater are classified under the VIP Client Protocol. All case materials are restricted to senior underwriters and designated case managers. Results are not shared with standard underwriting staff or third-party vendors without explicit client consent.",
+      "decision": "APPLY_VIP_PROTOCOL"
     }
   ],
   "document_chunks": [
@@ -89,37 +271,127 @@
       "id": "chunk_004",
       "source": "Underwriting Manual v3.2, Section 6.5",
       "text": "Applicants aged 45 or older presenting with a diagnosis of Type 2 Diabetes must undergo a full additional medical review including current medication, most recent A1C, and BMI assessment."
+    },
+    {
+      "id": "chunk_005",
+      "source": "Underwriting Manual v3.2, Section 5.2",
+      "text": "Controlled hypertension, defined as blood pressure consistently below 130/85 mmHg on stable medication, is classified as a mild risk factor. Applicants with Stage 1 hypertension on single-agent antihypertensive therapy may qualify for Preferred classification pending overall risk assessment. Uncontrolled hypertension above 160/100 mmHg disqualifies Preferred class eligibility."
+    },
+    {
+      "id": "chunk_006",
+      "source": "Underwriting Manual v3.2, Section 6.7",
+      "text": "Uncontrolled Type 2 Diabetes, indicated by an A1C of 8.0% or higher, results in automatic substandard classification with an additional mortality loading of 50% to 200% depending on comorbidities. Applicants must demonstrate two consecutive years of glycemic improvement before standard class reconsideration. Insulin dependency at initial application is subject to additional review."
+    },
+    {
+      "id": "chunk_007",
+      "source": "Underwriting Manual v3.2, Section 7.3",
+      "text": "Body Mass Index (BMI) at or above 30.0 kg/m² is classified as obese and triggers a mandatory rating table adjustment. A BMI between 30.0 and 34.9 typically results in a Table B substandard rating. When elevated BMI is combined with other metabolic risk factors such as diabetes or hypertension, an additional table rating or flat extra may be applied."
+    },
+    {
+      "id": "chunk_008",
+      "source": "Underwriting Manual v3.2, Section 7.8",
+      "text": "Obstructive Sleep Apnea (OSA) applicants who are compliant with Continuous Positive Airway Pressure (CPAP) therapy, as evidenced by downloaded compliance data showing usage of 4 or more hours per night on 70% or more of nights over the prior 90 days, may be considered for Standard class coverage. Non-compliant OSA or untreated moderate-to-severe OSA is rated substandard or declined based on the Apnea-Hypopnea Index severity."
+    },
+    {
+      "id": "chunk_009",
+      "source": "Underwriting Manual v3.2, Section 9.2",
+      "text": "Active tobacco use, including cigarettes, cigars, pipe tobacco, chewing tobacco, nicotine patches, vaping, or electronic cigarettes within the past 12 months, disqualifies applicants from all Preferred and Standard non-tobacco classifications. Tobacco users are assessed at smoker rates, which apply a 2x to 3x mortality loading over non-tobacco rates. Cessation for 12 consecutive months, verified by urine cotinine testing, is required before reclassification to non-smoker rates."
+    },
+    {
+      "id": "chunk_010",
+      "source": "Underwriting Manual v3.2, Section 8.4",
+      "text": "A history of Coronary Artery Disease (CAD), including prior myocardial infarction, coronary artery bypass graft (CABG), or percutaneous coronary intervention (PCI), requires a full cardiac underwriting workup including a current attending physician statement, stress test results, and echocardiogram. Applications received within 5 years of a cardiac event are typically postponed or declined. Cases beyond 5 years with documented normal stress testing and ejection fraction at or above 50% may be considered at substandard table rates."
+    },
+    {
+      "id": "chunk_011",
+      "source": "High-Value Policy Guidelines v2.1, Section 3.1",
+      "text": "Life insurance policies with a face value exceeding $2,000,000 require mandatory senior underwriter review and co-signature. An independent attending physician statement (APS) must be obtained directly from the applicant's primary care physician or specialist. Financial underwriting is mandatory: applicants must provide documentation of financial justification, including two years of tax returns, a current net worth statement, or a certified estate valuation prepared within 12 months."
+    },
+    {
+      "id": "chunk_012",
+      "source": "VIP Client Handling Protocol v1.4, Section 1.1",
+      "text": "High-net-worth applicants with a requested policy face value of $5,000,000 or greater are designated under the VIP Client Protocol and classified at the Confidential sensitivity tier. All application materials, underwriting notes, and medical records are restricted to senior underwriters and designated case managers approved for VIP access. Case details must not be shared with standard underwriting staff, junior analysts, or third-party reinsurance vendors without explicit written consent from the applicant or their authorized representative."
     }
   ],
   "relationships": {
     "applies_for": [
-      {"applicant_id": "applicant_001", "policy_id": "policy_001"}
+      {"applicant_id": "applicant_001", "policy_id": "policy_001"},
+      {"applicant_id": "applicant_002", "policy_id": "policy_001"},
+      {"applicant_id": "applicant_003", "policy_id": "policy_002"},
+      {"applicant_id": "applicant_004", "policy_id": "policy_002"},
+      {"applicant_id": "applicant_005", "policy_id": "policy_003"},
+      {"applicant_id": "applicant_006", "policy_id": "policy_003"}
     ],
     "has_condition": [
       {"applicant_id": "applicant_001", "risk_factor_id": "rf_001"},
       {"applicant_id": "applicant_001", "risk_factor_id": "rf_002"},
-      {"applicant_id": "applicant_001", "risk_factor_id": "rf_003"}
+      {"applicant_id": "applicant_001", "risk_factor_id": "rf_003"},
+      {"applicant_id": "applicant_002", "risk_factor_id": "rf_004"},
+      {"applicant_id": "applicant_002", "risk_factor_id": "rf_002"},
+      {"applicant_id": "applicant_003", "risk_factor_id": "rf_005"},
+      {"applicant_id": "applicant_003", "risk_factor_id": "rf_006"},
+      {"applicant_id": "applicant_003", "risk_factor_id": "rf_007"},
+      {"applicant_id": "applicant_004", "risk_factor_id": "rf_008"},
+      {"applicant_id": "applicant_004", "risk_factor_id": "rf_009"},
+      {"applicant_id": "applicant_005", "risk_factor_id": "rf_010"},
+      {"applicant_id": "applicant_005", "risk_factor_id": "rf_011"},
+      {"applicant_id": "applicant_006", "risk_factor_id": "rf_004"},
+      {"applicant_id": "applicant_006", "risk_factor_id": "rf_002"},
+      {"applicant_id": "applicant_006", "risk_factor_id": "rf_011"}
     ],
     "has_lab_result": [
-      {"applicant_id": "applicant_001", "lab_result_id": "lab_001"}
+      {"applicant_id": "applicant_001", "lab_result_id": "lab_001"},
+      {"applicant_id": "applicant_002", "lab_result_id": "lab_002"},
+      {"applicant_id": "applicant_003", "lab_result_id": "lab_003"},
+      {"applicant_id": "applicant_003", "lab_result_id": "lab_004"},
+      {"applicant_id": "applicant_004", "lab_result_id": "lab_005"},
+      {"applicant_id": "applicant_005", "lab_result_id": "lab_006"},
+      {"applicant_id": "applicant_006", "lab_result_id": "lab_007"}
     ],
     "has_rule": [
       {"policy_id": "policy_001", "rule_id": "rule_001"},
       {"policy_id": "policy_001", "rule_id": "rule_002"},
       {"policy_id": "policy_001", "rule_id": "rule_003"},
-      {"policy_id": "policy_001", "rule_id": "rule_004"}
+      {"policy_id": "policy_001", "rule_id": "rule_004"},
+      {"policy_id": "policy_001", "rule_id": "rule_005"},
+      {"policy_id": "policy_002", "rule_id": "rule_006"},
+      {"policy_id": "policy_002", "rule_id": "rule_007"},
+      {"policy_id": "policy_002", "rule_id": "rule_008"},
+      {"policy_id": "policy_002", "rule_id": "rule_009"},
+      {"policy_id": "policy_002", "rule_id": "rule_010"},
+      {"policy_id": "policy_003", "rule_id": "rule_005"},
+      {"policy_id": "policy_003", "rule_id": "rule_011"},
+      {"policy_id": "policy_003", "rule_id": "rule_012"}
     ],
     "supported_by": [
       {"rule_id": "rule_001", "chunk_id": "chunk_001"},
       {"rule_id": "rule_002", "chunk_id": "chunk_002"},
       {"rule_id": "rule_003", "chunk_id": "chunk_003"},
-      {"rule_id": "rule_004", "chunk_id": "chunk_004"}
+      {"rule_id": "rule_004", "chunk_id": "chunk_004"},
+      {"rule_id": "rule_005", "chunk_id": "chunk_005"},
+      {"rule_id": "rule_006", "chunk_id": "chunk_006"},
+      {"rule_id": "rule_007", "chunk_id": "chunk_007"},
+      {"rule_id": "rule_008", "chunk_id": "chunk_008"},
+      {"rule_id": "rule_009", "chunk_id": "chunk_009"},
+      {"rule_id": "rule_010", "chunk_id": "chunk_010"},
+      {"rule_id": "rule_011", "chunk_id": "chunk_011"},
+      {"rule_id": "rule_012", "chunk_id": "chunk_012"}
     ],
     "evaluated_by": [
       {"risk_factor_id": "rf_001", "rule_id": "rule_002"},
       {"risk_factor_id": "rf_001", "rule_id": "rule_004"},
       {"risk_factor_id": "rf_002", "rule_id": "rule_003"},
-      {"risk_factor_id": "rf_003", "rule_id": "rule_002"}
+      {"risk_factor_id": "rf_003", "rule_id": "rule_002"},
+      {"risk_factor_id": "rf_004", "rule_id": "rule_005"},
+      {"risk_factor_id": "rf_005", "rule_id": "rule_006"},
+      {"risk_factor_id": "rf_005", "rule_id": "rule_004"},
+      {"risk_factor_id": "rf_006", "rule_id": "rule_007"},
+      {"risk_factor_id": "rf_007", "rule_id": "rule_008"},
+      {"risk_factor_id": "rf_008", "rule_id": "rule_010"},
+      {"risk_factor_id": "rf_009", "rule_id": "rule_009"},
+      {"risk_factor_id": "rf_010", "rule_id": "rule_011"},
+      {"risk_factor_id": "rf_011", "rule_id": "rule_011"},
+      {"risk_factor_id": "rf_011", "rule_id": "rule_012"}
     ]
   }
 }

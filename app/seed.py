@@ -39,10 +39,23 @@ def create_constraints(session):
     print(f"  {len(constraints)} constraints created (or already existed).")
 
 
+_SENSITIVITY_LABELS = {
+    "standard": "Standard",
+    "restricted": "Restricted",
+    "confidential": "Confidential",
+}
+
+
 def create_nodes(session, data):
     for node in data["applicants"]:
         props = {k: v for k, v in node.items() if k != "id"}
         session.run("MERGE (n:Applicant {id: $id}) SET n += $props", id=node["id"], props=props)
+        tier = node.get("sensitivity")
+        if tier and tier in _SENSITIVITY_LABELS:
+            # Cypher cannot accept a label name as a parameter, so we use an
+            # allowlist to safely interpolate the validated label string.
+            label = _SENSITIVITY_LABELS[tier]
+            session.run(f"MATCH (n:Applicant {{id: $id}}) SET n:{label}", id=node["id"])
     print(f"  {len(data['applicants'])} Applicant(s)")
 
     for node in data["policies"]:

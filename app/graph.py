@@ -6,6 +6,11 @@ def get_driver():
     return GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
 
+def get_rbac_driver(username: str, password: str):
+    """Return a driver authenticated as the given RBAC user."""
+    return GraphDatabase.driver(NEO4J_URI, auth=(username, password))
+
+
 def run_query(driver, query, parameters=None):
     with driver.session(database=NEO4J_DATABASE) as session:
         result = session.run(query, parameters or {})

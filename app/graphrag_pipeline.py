@@ -66,6 +66,36 @@ class GraphRAGPipeline:
             "answer": answer,
         }
 
+    def run_with_driver(
+        self,
+        question: str,
+        scoped_driver,
+        top_k: int = 3,
+        check_compatibility: bool = True,
+    ) -> dict:
+        """
+        Run the full pipeline using `scoped_driver` for all Neo4j queries.
+
+        Creates a temporary GraphRetriever authenticated as the RBAC user so
+        Neo4j's DENY rules suppress denied-tier applicants in both Phase 1
+        (vector search) and Phase 2 (graph traversal).  The embedding provider
+        and LLM are shared with the base pipeline — no extra API clients are
+        allocated per request.
+        """
+        scoped_retriever = GraphRetriever(
+            scoped_driver,
+            embedding_provider=self.retriever.embedding_provider,
+        )
+        context = scoped_retriever.retrieve_context(
+            question, top_k=top_k, check_compatibility=check_compatibility
+        )
+        answer = self.llm.generate_answer(question, context)
+        return {
+            "question": question,
+            "context": context,
+            "answer": answer,
+        }
+
 
 # ------------------------------------------------------------------
 # Display helper

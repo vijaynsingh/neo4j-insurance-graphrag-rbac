@@ -6,15 +6,21 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from neo4j.exceptions import AuthError, ServiceUnavailable
-from pydantic import BaseModel
 
-from app.config import OPENAI_API_KEY
-from app.graph import get_driver, run_query
+from app.config import (
+    OPENAI_API_KEY,
+    RBAC_ROLE_MAP,
+    RBAC_USER_PASSWORD,
+    RBAC_DEFAULT_ROLE,
+)
+from app.graph import get_driver, get_rbac_driver, run_query
 from app.graphrag_pipeline import GraphRAGPipeline
+from pydantic import BaseModel
 
 STATIC_DIR = Path(__file__).parent.parent / "static"
 
 VALID_MODES = {"demo", "openai", "text2cypher", "auto"}
+VALID_ROLES = set(RBAC_ROLE_MAP.keys())
 
 
 # ------------------------------------------------------------------
@@ -24,6 +30,7 @@ VALID_MODES = {"demo", "openai", "text2cypher", "auto"}
 class AskRequest(BaseModel):
     question: str
     mode: str = "demo"
+    role: str = RBAC_DEFAULT_ROLE
 
 
 class RetrievalSummary(BaseModel):
@@ -60,6 +67,9 @@ class AskResponse(BaseModel):
     # Auto Mode fields — None for all other modes
     selected_strategy:   str | None  = None
     router_reason:       str | None  = None
+    # RBAC — active role and the Neo4j user it maps to
+    role:      str = RBAC_DEFAULT_ROLE
+    rbac_user: str = "uw_manager"
 
 
 # ------------------------------------------------------------------
@@ -82,6 +92,8 @@ async def _auto_reseed_if_needed(
 
     The asyncio.Lock prevents concurrent requests from triggering a double-reseed.
     Each reseed operation runs in a thread pool so the async event loop is not blocked.
+    Uses the admin driver — DocumentChunk metadata is readable by all roles but
+    the reseed write operation requires admin access.
     """
     def _stored_model() -> str | None:
         rows = run_query(
@@ -115,11 +127,35 @@ async def _auto_reseed_if_needed(
 
 
 # ------------------------------------------------------------------
+# RBAC helper
+# ------------------------------------------------------------------
+
+def _get_scoped_driver(role: str, state):
+    """
+    Return the cached per-role RBAC driver from app.state.rbac_drivers.
+    Raises HTTP 503 if the driver was not successfully created at startup
+    (e.g. rbac_setup.py was not run, or the Neo4j user does not exist).
+    """
+    driver = state.rbac_drivers.get(role)
+    if driver is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"RBAC driver for role '{role}' is unavailable. "
+                "Ensure `python3 -m app.rbac_setup` has been run and "
+                "the server has been restarted."
+            ),
+        )
+    return driver
+
+
+# ------------------------------------------------------------------
 # Lifespan: open the Neo4j driver once and reuse it across requests
 # ------------------------------------------------------------------
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Admin driver — used for seeding, reindex, and embedding metadata checks
     driver = get_driver()
     app.state.driver = driver
     app.state.reseed_lock = asyncio.Lock()
@@ -146,7 +182,29 @@ async def lifespan(app: FastAPI):
         app.state.auto_router      = None
         app.state.auto_synthesizer = None
 
+    # Per-role RBAC drivers — pre-created at startup so each request pays
+    # only a dict lookup.  One driver (connection pool) per Neo4j RBAC user.
+    print("[RBAC] Creating per-role drivers...")
+    rbac_drivers: dict[str, object] = {}
+    for role, username in RBAC_ROLE_MAP.items():
+        try:
+            d = get_rbac_driver(username, RBAC_USER_PASSWORD)
+            d.verify_connectivity()
+            rbac_drivers[role] = d
+            print(f"  [RBAC] {role} → {username}: connected")
+        except Exception as exc:
+            print(f"  [RBAC] WARNING: {role} ({username}) unavailable — {exc}")
+            print("         Run `python3 -m app.rbac_setup` and restart.")
+    app.state.rbac_drivers = rbac_drivers
+
     yield
+
+    # Shutdown: close all RBAC drivers before the admin driver
+    for d in rbac_drivers.values():
+        try:
+            d.close()
+        except Exception:
+            pass
     driver.close()
 
 
@@ -157,7 +215,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Neo4j Insurance GraphRAG",
     description="Insurance underwriting question-answering via graph-augmented retrieval.",
-    version="0.10.0",
+    version="0.11.0",
     lifespan=lifespan,
 )
 
@@ -191,6 +249,18 @@ async def ask(body: AskRequest, request: Request):
             detail=f"mode must be one of: {sorted(VALID_MODES)}",
         )
 
+    # ── Role / RBAC resolution ──────────────────────────────────────────────
+    # Resolved once here; every mode branch uses scoped_driver for Neo4j queries.
+    role = body.role
+    if role not in VALID_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"role must be one of: {sorted(VALID_ROLES)}",
+        )
+    rbac_user = RBAC_ROLE_MAP[role]
+    scoped_driver = _get_scoped_driver(role, request.app.state)
+    # ───────────────────────────────────────────────────────────────────────
+
     # ── Text2Cypher mode ────────────────────────────────────────────────────
     if mode == "text2cypher":
         t2c = request.app.state.t2c_service
@@ -203,7 +273,9 @@ async def ask(body: AskRequest, request: Request):
                 ),
             )
         try:
-            t2c_result = await asyncio.to_thread(t2c.run, question)
+            t2c_result = await asyncio.to_thread(
+                t2c.run_with_driver, question, scoped_driver
+            )
         except (ServiceUnavailable, AuthError) as exc:
             raise HTTPException(
                 status_code=503,
@@ -238,6 +310,8 @@ async def ask(body: AskRequest, request: Request):
             generated_cypher=t2c_result["generated_cypher"],
             raw_query_results=t2c_result["raw_query_results"],
             retrieval_strategy="Text2Cypher",
+            role=role,
+            rbac_user=rbac_user,
         )
 
     # ── Auto Mode (router → openai_graph | text2cypher | hybrid) ───────────
@@ -274,7 +348,10 @@ async def ask(body: AskRequest, request: Request):
             reseeded = await _auto_reseed_if_needed(openai_pipeline, driver, lock)
             try:
                 result = await asyncio.to_thread(
-                    lambda: openai_pipeline.run(question, check_compatibility=not reseeded)
+                    lambda: openai_pipeline.run_with_driver(
+                        question, scoped_driver,
+                        check_compatibility=not reseeded,
+                    )
                 )
             except (ServiceUnavailable, AuthError) as exc:
                 raise HTTPException(status_code=503, detail=f"Neo4j unavailable — {exc}")
@@ -309,6 +386,8 @@ async def ask(body: AskRequest, request: Request):
                 retrieval_strategy="openai_graph",
                 selected_strategy="openai_graph",
                 router_reason=router_reason,
+                role=role,
+                rbac_user=rbac_user,
             )
 
         # Step 2b — text2cypher path
@@ -319,7 +398,9 @@ async def ask(body: AskRequest, request: Request):
                     detail="text2cypher service not available — OPENAI_API_KEY required",
                 )
             try:
-                t2c_result = await asyncio.to_thread(t2c.run, question)
+                t2c_result = await asyncio.to_thread(
+                    t2c.run_with_driver, question, scoped_driver
+                )
             except (ServiceUnavailable, AuthError) as exc:
                 raise HTTPException(status_code=503, detail=f"Neo4j unavailable — {exc}")
             except ValueError as exc:
@@ -348,16 +429,23 @@ async def ask(body: AskRequest, request: Request):
                 retrieval_strategy="text2cypher",
                 selected_strategy="text2cypher",
                 router_reason=router_reason,
+                role=role,
+                rbac_user=rbac_user,
             )
 
         # Step 2c — hybrid path (run both in parallel, synthesize)
         reseeded = await _auto_reseed_if_needed(openai_pipeline, driver, lock)
 
         graphrag_coro = asyncio.to_thread(
-            lambda: openai_pipeline.run(question, check_compatibility=not reseeded)
+            lambda: openai_pipeline.run_with_driver(
+                question, scoped_driver,
+                check_compatibility=not reseeded,
+            )
         )
         if t2c is not None:
-            t2c_coro = asyncio.to_thread(t2c.run, question)
+            t2c_coro = asyncio.to_thread(
+                t2c.run_with_driver, question, scoped_driver
+            )
             graphrag_r, t2c_r = await asyncio.gather(
                 graphrag_coro, t2c_coro, return_exceptions=True
             )
@@ -420,6 +508,8 @@ async def ask(body: AskRequest, request: Request):
             retrieval_strategy="Hybrid",
             selected_strategy="hybrid",
             router_reason=router_reason + t2c_note,
+            role=role,
+            rbac_user=rbac_user,
         )
 
     # ── GraphRAG modes (demo / openai) ──────────────────────────────────────
@@ -443,8 +533,11 @@ async def ask(body: AskRequest, request: Request):
     reseeded = await _auto_reseed_if_needed(pipeline, driver, lock)
 
     try:
-        # Skip the in-query compatibility check when we just reseeded (saves a DB round-trip)
-        result = pipeline.run(question, check_compatibility=not reseeded)
+        # Skip the in-query compatibility check when we just reseeded (saves a DB round-trip).
+        # Queries run as scoped_driver so Neo4j enforces tier access for both phases.
+        result = pipeline.run_with_driver(
+            question, scoped_driver, check_compatibility=not reseeded
+        )
     except (ServiceUnavailable, AuthError) as exc:
         raise HTTPException(
             status_code=503,
@@ -479,10 +572,13 @@ async def ask(body: AskRequest, request: Request):
             "policies":     context["policies"],
             "applicants":   context["applicants"],
         },
-        # Step 10 — mode and provider metadata
+        # Mode and provider metadata
         mode=mode,
         embedding_provider=pipeline.retriever.embedding_provider.model_name,
         llm_provider=type(pipeline.llm).__name__,
         compatibility_warning=context.get("compatibility_warning"),
         reindexed=reseeded,
+        # RBAC
+        role=role,
+        rbac_user=rbac_user,
     )

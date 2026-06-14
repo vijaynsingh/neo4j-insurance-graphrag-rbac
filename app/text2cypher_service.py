@@ -275,6 +275,43 @@ class Text2CypherService:
             "retrieval_strategy": "Text2Cypher",
         }
 
+    def run_with_driver(self, question: str, scoped_driver) -> dict:
+        """
+        Same as run() but executes the generated Cypher using `scoped_driver`
+        so Neo4j RBAC restricts which applicant nodes are visible in results.
+        LLM calls (generate_cypher / generate_answer) are unaffected.
+        """
+        raw_cypher = self.generate_cypher(question)
+        print(f"[text2cypher] generated cypher: {raw_cypher!r}")
+
+        safe_cypher = self.validate_cypher(raw_cypher)
+        print(f"[text2cypher] validated cypher: {safe_cypher!r}")
+
+        try:
+            records = run_query(scoped_driver, safe_cypher)
+        except CypherSyntaxError as exc:
+            raise ValueError(
+                f"Cypher syntax error in generated query: {exc.message}"
+            ) from exc
+        except Neo4jError as exc:
+            raise ValueError(
+                f"Neo4j error executing generated query: {exc.message}"
+            ) from exc
+        records = records[:_MAX_RECORDS]
+        print(f"[text2cypher] rows returned: {len(records)}")
+
+        synthesis = self.generate_answer(question, safe_cypher, records)
+
+        return {
+            "answer":            synthesis["answer"],
+            "reasoning":         synthesis["reasoning"],
+            "generated_cypher":  safe_cypher,
+            "raw_query_results": records,
+            "mode":              "text2cypher",
+            "llm_provider":      "OpenAILLM",
+            "retrieval_strategy": "Text2Cypher",
+        }
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers

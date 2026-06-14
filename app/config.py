@@ -14,3 +14,14 @@ USE_OPENAI_EMBEDDINGS = os.getenv("USE_OPENAI_EMBEDDINGS", "false").lower() == "
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 USE_OPENAI_LLM = os.getenv("USE_OPENAI_LLM", "false").lower() == "true"
 OPENAI_LLM_MODEL = os.getenv("OPENAI_LLM_MODEL", "gpt-4o")
+
+# RBAC — maps API role names → Neo4j usernames created by rbac_setup.py.
+# The default role (underwriting_manager) gives full access, so existing
+# callers that omit the role field see unchanged behaviour.
+RBAC_ROLE_MAP: dict[str, str] = {
+    "underwriter":          "uw_standard",
+    "senior_underwriter":   "uw_senior",
+    "underwriting_manager": "uw_manager",
+}
+RBAC_USER_PASSWORD: str = os.getenv("RBAC_USER_PASSWORD", "demo1234")
+RBAC_DEFAULT_ROLE:  str = "underwriting_manager"

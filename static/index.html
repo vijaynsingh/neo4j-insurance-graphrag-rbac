@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Neo4j Insurance GraphRAG</title>
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/static/styles.css?v=2" />
+  <link rel="stylesheet" href="/static/styles.css?v=4" />
 </head>
 <body>
 
@@ -40,6 +40,7 @@
       <textarea id="question" rows="3" spellcheck="false"></textarea>
 
       <!-- Mode selector -->
+      <p class="selector-sublabel">Retrieval Mode</p>
       <div class="mode-selector" role="radiogroup" aria-label="Pipeline mode">
         <label class="mode-option">
           <input type="radio" name="mode" value="demo" checked />
@@ -71,45 +72,62 @@
         </label>
       </div>
 
+      <!-- Role selector (RBAC tier access) -->
+      <p class="selector-sublabel">Access Role</p>
+      <div class="role-selector" role="radiogroup" aria-label="Access role">
+        <label class="role-option">
+          <input type="radio" name="role" value="underwriting_manager" checked />
+          <span class="role-label-text">
+            <strong>Underwriting Manager</strong>
+            <small>All tiers — Standard + Restricted + Confidential</small>
+          </span>
+        </label>
+        <label class="role-option">
+          <input type="radio" name="role" value="senior_underwriter" />
+          <span class="role-label-text">
+            <strong>Senior Underwriter</strong>
+            <small>Standard + Restricted only</small>
+          </span>
+        </label>
+        <label class="role-option">
+          <input type="radio" name="role" value="underwriter" />
+          <span class="role-label-text">
+            <strong>Underwriter</strong>
+            <small>Standard tier only</small>
+          </span>
+        </label>
+      </div>
+
       <!-- Learning mode example hints — visible only in Learning mode -->
       <div id="demo-hints" class="auto-hints hidden">
         <span class="auto-hint-label">Learning Examples</span>
         <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
-        <button class="auto-example" type="button">How does controlled diabetes affect preferred underwriting?</button>
-        <button class="auto-example" type="button">What role does tobacco use play in the risk profile?</button>
+        <button class="auto-example" type="button">How are high-value VIP policies over $5 million underwritten?</button>
+        <button class="auto-example" type="button">What are the underwriting requirements for coronary artery disease history?</button>
       </div>
 
       <!-- OpenAI GraphRAG example hints — visible only in OpenAI mode -->
       <div id="openai-hints" class="auto-hints hidden">
         <span class="auto-hint-label">OpenAI GraphRAG Examples</span>
         <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
-        <button class="auto-example" type="button">Explain how controlled diabetes affects preferred underwriting.</button>
-        <button class="auto-example" type="button">What does the underwriting manual say about tobacco use?</button>
+        <button class="auto-example" type="button">How are high-value VIP policies over $5 million underwritten?</button>
+        <button class="auto-example" type="button">What are the underwriting requirements for coronary artery disease history?</button>
       </div>
 
       <!-- Text2Cypher example hints — visible only in Text2Cypher mode -->
       <div id="t2c-hints" class="auto-hints hidden">
         <span class="auto-hint-label">Text2Cypher Examples</span>
-        <button class="auto-example" type="button">Which underwriting rules apply to John Smith?</button>
-        <button class="auto-example" type="button">What risk factors does John Smith have?</button>
-        <button class="auto-example" type="button">What policy is John Smith applying for?</button>
+        <button class="auto-example" type="button">List all applicants and their policy types.</button>
+        <button class="auto-example" type="button">How many applicants have uncontrolled conditions?</button>
+        <button class="auto-example" type="button">Which underwriting rules apply to coronary artery disease?</button>
       </div>
 
       <!-- Auto Mode router examples — visible only in Auto mode -->
       <div id="auto-hints" class="auto-hints hidden">
         <span class="auto-hint-label">Router Examples</span>
-        <div class="auto-example-group">
-          <span class="auto-example-type">OpenAI GraphRAG</span>
-          <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
-        </div>
-        <div class="auto-example-group">
-          <span class="auto-example-type">Text2Cypher</span>
-          <button class="auto-example" type="button">Which underwriting rules apply to John Smith?</button>
-        </div>
-        <div class="auto-example-group">
-          <span class="auto-example-type">Hybrid</span>
-          <button class="auto-example" type="button">Based on John Smith's profile and underwriting rules, what is your recommendation?</button>
-        </div>
+        <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
+        <button class="auto-example" type="button">How are high-value VIP policies over $5 million underwritten?</button>
+        <button class="auto-example" type="button">What are the underwriting requirements for coronary artery disease history?</button>
       </div>
 
       <div class="input-row">
@@ -144,6 +162,9 @@
         <span class="hidden" id="auto-selected-group">Selected: <strong id="auto-selected-display">—</strong></span>
         <!-- retrieval strategy (non-auto) -->
         <span class="provider-sep hidden" id="strategy-sep">·</span><span class="hidden" id="strategy-label">Strategy: <strong id="strategy-display">—</strong></span>
+        <!-- RBAC role -->
+        <span class="provider-sep" id="role-sep">·</span>
+        <span id="role-group">Role: <strong id="role-display">—</strong></span>
       </div>
 
       <!-- Compatibility warning — only shown if auto-reseed failed -->
@@ -156,6 +177,14 @@
       <div id="reindex-notice" class="reindex-notice hidden">
         Embeddings automatically reindexed for <strong id="reindex-mode"></strong> mode.
         Similarity scores are now semantically meaningful.
+      </div>
+
+      <!-- RBAC access context — shown with every result -->
+      <div id="rbac-context" class="rbac-context-bar hidden">
+        <span class="rbac-context-label">RBAC</span>
+        <strong id="rbac-role-name">—</strong>
+        <span class="rbac-sep">·</span>
+        <span id="rbac-scope-text" class="rbac-scope"></span>
       </div>
 
       <!-- Router reason callout — auto mode only -->
@@ -235,6 +264,6 @@
     </p>
   </footer>
 
-  <script src="/static/app.js?v=2"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

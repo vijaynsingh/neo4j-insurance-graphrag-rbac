@@ -1,14 +1,32 @@
 'use strict';
 
+const ROLE_LABELS = {
+  underwriter:          'Underwriter',
+  senior_underwriter:   'Senior Underwriter',
+  underwriting_manager: 'Underwriting Manager',
+};
+
+const ROLE_SCOPE = {
+  underwriter:          'Standard tier only · Restricted + Confidential clients hidden',
+  senior_underwriter:   'Standard + Restricted · Confidential clients hidden',
+  underwriting_manager: 'All tiers visible',
+};
+
 const MODE_FIRST_EXAMPLES = {
   demo:        'Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?',
   openai:      'Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?',
-  text2cypher: 'Which underwriting rules apply to John Smith?',
+  text2cypher: 'List all applicants and their policy types.',
   auto:        'Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?',
 };
 
 const ALL_KNOWN_SAMPLES = new Set([
   'Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?',
+  'How are high-value VIP policies over $5 million underwritten?',
+  'What are the underwriting requirements for coronary artery disease history?',
+  'List all applicants and their policy types.',
+  'How many applicants have uncontrolled conditions?',
+  'Which underwriting rules apply to coronary artery disease?',
+  // legacy samples kept so mode-switching still auto-updates the textarea if present
   'How does controlled diabetes affect preferred underwriting?',
   'What role does tobacco use play in the risk profile?',
   'Explain how controlled diabetes affects preferred underwriting.',
@@ -56,6 +74,7 @@ async function runQuery() {
   if (!question) return;
 
   const mode = document.querySelector('input[name="mode"]:checked')?.value || 'demo';
+  const role = document.querySelector('input[name="role"]:checked')?.value || 'underwriting_manager';
 
   setLoading(true, mode);
   clearError();
@@ -65,7 +84,7 @@ async function runQuery() {
     const res = await fetch('/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, mode }),
+      body: JSON.stringify({ question, mode, role }),
     });
 
     const data = await res.json();
@@ -94,6 +113,7 @@ function render(data) {
   renderProviderBar(data);
   renderCompatWarning(data.compatibility_warning);
   renderReindexNotice(data);
+  renderRbacContext(data);
   renderRouterReason(data);
   renderQuestion(data.question);
 
@@ -272,10 +292,20 @@ function renderCitations(citations) {
   });
 }
 
+// RBAC context bar
+function renderRbacContext(data) {
+  const el = document.getElementById('rbac-context');
+  if (!data.role) { hide(el); return; }
+  document.getElementById('rbac-role-name').textContent  = ROLE_LABELS[data.role]  || data.role;
+  document.getElementById('rbac-scope-text').textContent = ROLE_SCOPE[data.role]   || '';
+  show(el);
+}
+
 // Provider bar
 function renderProviderBar(data) {
   const modeLabels = { openai: 'OpenAI', text2cypher: 'Text2Cypher', demo: 'Learning', auto: 'Auto' };
   document.getElementById('mode-display').textContent = modeLabels[data.mode] || 'Learning';
+  document.getElementById('role-display').textContent = ROLE_LABELS[data.role] || data.role || '—';
 
   const isAuto = data.mode === 'auto';
 

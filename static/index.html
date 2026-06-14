@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neo4j Insurance GraphRAG</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/static/styles.css?v=2" />
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <div class="header-title">
+        <img src="/static/favicon.svg" alt="" class="header-icon" aria-hidden="true" />
+        <h1>Neo4j Insurance GraphRAG</h1>
+      </div>
+      <p>Ask an underwriting question and explore how GraphRAG combines semantic retrieval, graph traversal, and AI reasoning.</p>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- Pipeline overview -->
+    <div class="pipeline-strip">
+      <div class="pipeline-step">Question</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">Vector Search</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">Graph Traversal</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step">LLM Reasoning</div>
+      <div class="pipeline-arrow">→</div>
+      <div class="pipeline-step highlight">Decision</div>
+    </div>
+
+    <!-- Query input -->
+    <div class="card" id="query-card">
+      <label for="question" class="input-label">Underwriting question</label>
+      <textarea id="question" rows="3" spellcheck="false"></textarea>
+
+      <!-- Mode selector -->
+      <div class="mode-selector" role="radiogroup" aria-label="Pipeline mode">
+        <label class="mode-option">
+          <input type="radio" name="mode" value="demo" checked />
+          <span class="mode-label-text">
+            <strong>Learning Mode</strong>
+            <small>Mock embeddings · MockLLM</small>
+          </span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="openai" />
+          <span class="mode-label-text">
+            <strong>OpenAI Mode</strong>
+            <small>text-embedding-3-small · gpt-4o</small>
+          </span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="text2cypher" />
+          <span class="mode-label-text">
+            <strong>Text2Cypher Mode</strong>
+            <small>OpenAI · dynamic Cypher generation</small>
+          </span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="mode" value="auto" />
+          <span class="mode-label-text">
+            <strong>Auto Mode</strong>
+            <small>Router · chooses best strategy</small>
+          </span>
+        </label>
+      </div>
+
+      <!-- Learning mode example hints — visible only in Learning mode -->
+      <div id="demo-hints" class="auto-hints hidden">
+        <span class="auto-hint-label">Learning Examples</span>
+        <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
+        <button class="auto-example" type="button">How does controlled diabetes affect preferred underwriting?</button>
+        <button class="auto-example" type="button">What role does tobacco use play in the risk profile?</button>
+      </div>
+
+      <!-- OpenAI GraphRAG example hints — visible only in OpenAI mode -->
+      <div id="openai-hints" class="auto-hints hidden">
+        <span class="auto-hint-label">OpenAI GraphRAG Examples</span>
+        <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
+        <button class="auto-example" type="button">Explain how controlled diabetes affects preferred underwriting.</button>
+        <button class="auto-example" type="button">What does the underwriting manual say about tobacco use?</button>
+      </div>
+
+      <!-- Text2Cypher example hints — visible only in Text2Cypher mode -->
+      <div id="t2c-hints" class="auto-hints hidden">
+        <span class="auto-hint-label">Text2Cypher Examples</span>
+        <button class="auto-example" type="button">Which underwriting rules apply to John Smith?</button>
+        <button class="auto-example" type="button">What risk factors does John Smith have?</button>
+        <button class="auto-example" type="button">What policy is John Smith applying for?</button>
+      </div>
+
+      <!-- Auto Mode router examples — visible only in Auto mode -->
+      <div id="auto-hints" class="auto-hints hidden">
+        <span class="auto-hint-label">Router Examples</span>
+        <div class="auto-example-group">
+          <span class="auto-example-type">OpenAI GraphRAG</span>
+          <button class="auto-example" type="button">Should a diabetic applicant with A1C below 7.0 qualify for preferred term life?</button>
+        </div>
+        <div class="auto-example-group">
+          <span class="auto-example-type">Text2Cypher</span>
+          <button class="auto-example" type="button">Which underwriting rules apply to John Smith?</button>
+        </div>
+        <div class="auto-example-group">
+          <span class="auto-example-type">Hybrid</span>
+          <button class="auto-example" type="button">Based on John Smith's profile and underwriting rules, what is your recommendation?</button>
+        </div>
+      </div>
+
+      <div class="input-row">
+        <span class="hint">Ctrl+Enter to submit</span>
+        <button id="ask-btn">Ask →</button>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="hidden">
+      <span class="spinner"></span> Running GraphRAG pipeline…
+    </div>
+
+    <!-- Error -->
+    <div id="error" class="hidden error-box"></div>
+
+    <!-- Results -->
+    <div id="results" class="hidden">
+
+      <!-- Provider bar — always shown with results -->
+      <div class="provider-bar">
+        Mode: <strong id="mode-display">—</strong>
+        <!-- standard mode fields -->
+        <span class="provider-sep" id="std-embedding-sep">·</span>
+        <span id="std-embedding-group">Embedding: <strong id="embedding-display">—</strong></span>
+        <span class="provider-sep" id="std-llm-sep">·</span>
+        <span id="std-llm-group">LLM: <strong id="llm-display">—</strong></span>
+        <!-- auto mode fields -->
+        <span class="provider-sep hidden" id="auto-router-sep">·</span>
+        <span class="hidden" id="auto-router-group">Router: <strong id="router-display">GPT-4o</strong></span>
+        <span class="provider-sep hidden" id="auto-selected-sep">·</span>
+        <span class="hidden" id="auto-selected-group">Selected: <strong id="auto-selected-display">—</strong></span>
+        <!-- retrieval strategy (non-auto) -->
+        <span class="provider-sep hidden" id="strategy-sep">·</span><span class="hidden" id="strategy-label">Strategy: <strong id="strategy-display">—</strong></span>
+      </div>
+
+      <!-- Compatibility warning — only shown if auto-reseed failed -->
+      <div id="compat-warning" class="compat-warning hidden">
+        <strong>Embedding mismatch</strong> —
+        <span id="compat-warning-text"></span>
+      </div>
+
+      <!-- Reindex notice — shown once after automatic embedding switch -->
+      <div id="reindex-notice" class="reindex-notice hidden">
+        Embeddings automatically reindexed for <strong id="reindex-mode"></strong> mode.
+        Similarity scores are now semantically meaningful.
+      </div>
+
+      <!-- Router reason callout — auto mode only -->
+      <div id="router-reason-box" class="router-callout hidden">
+        <span class="router-callout-label">Router</span>
+        <span id="router-selected-badge" class="strategy-badge">—</span>
+        <span id="router-reason-text"></span>
+      </div>
+
+      <!-- S1: Question -->
+      <div class="card">
+        <h2><span class="step-badge">Question</span></h2>
+        <p id="display-question" class="question-text"></p>
+      </div>
+
+      <!-- S_T2C_A: Generated Cypher — text2cypher mode only -->
+      <div class="card hidden" id="t2c-cypher-card">
+        <h2><span class="step-badge t2c-step">Cypher</span> Generated Cypher</h2>
+        <p class="section-hint">Cypher query generated from your question and executed against Neo4j.</p>
+        <pre class="cypher-block" id="t2c-cypher-block"></pre>
+      </div>
+
+      <!-- S_T2C_B: Raw Query Results — text2cypher mode only -->
+      <div class="card hidden" id="t2c-results-card">
+        <h2><span class="step-badge t2c-step">Results</span> Raw Query Results</h2>
+        <p class="section-hint">Records returned directly from Neo4j.</p>
+        <div class="raw-results" id="t2c-results-body"></div>
+      </div>
+
+      <!-- S2: Phase 1 — Vector retrieval -->
+      <div class="card" id="phase1-card">
+        <h2><span class="step-badge phase1">Phase 1</span> Vector Search</h2>
+        <p class="section-hint">
+          The question is embedded and compared against DocumentChunk vectors stored in
+          Neo4j's HNSW index. Top-k chunks with the highest cosine similarity are returned.
+        </p>
+        <div id="chunks-list"></div>
+      </div>
+
+      <!-- S3: Phase 2 — Graph traversal -->
+      <div class="card" id="phase2-card">
+        <h2><span class="step-badge phase2">Phase 2</span> Graph Traversal</h2>
+        <p class="section-hint">
+          Starting from the matched chunks, the graph is traversed outward:
+          <code>DocumentChunk ← SUPPORTED_BY ← UnderwritingRule ← EVALUATED_BY ← RiskFactor ← HAS_CONDITION ← Applicant</code>
+        </p>
+        <div id="graph-context"></div>
+      </div>
+
+      <!-- S4: Decision -->
+      <div class="card decision-card" id="decision-card">
+        <h2><span class="step-badge result">Decision</span></h2>
+        <div id="decision-badge"></div>
+      </div>
+
+      <!-- S5: Reasoning / Answer -->
+      <div class="card">
+        <h2><span class="step-badge reasoning" id="reasoning-badge">Reasoning</span></h2>
+        <ol id="reasoning-list"></ol>
+      </div>
+
+      <!-- S6: Citations -->
+      <div class="card" id="citations-card">
+        <h2><span class="step-badge citations">Citations</span></h2>
+        <p class="section-hint">Every statement is traceable to a specific graph node.</p>
+        <div id="citations-list"></div>
+      </div>
+
+    </div>
+  </main>
+
+  <footer>
+    <p>
+      Neo4j Insurance GraphRAG ·
+      <a href="/docs" target="_blank">API docs</a> ·
+      <a href="/health" target="_blank">/health</a>
+    </p>
+  </footer>
+
+  <script src="/static/app.js?v=2"></script>
+</body>
+</html>

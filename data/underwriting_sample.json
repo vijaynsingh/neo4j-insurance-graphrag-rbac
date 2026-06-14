@@ -1,0 +1,125 @@
+{
+  "applicants": [
+    {
+      "id": "applicant_001",
+      "name": "John Smith",
+      "age": 48
+    }
+  ],
+  "policies": [
+    {
+      "id": "policy_001",
+      "name": "Preferred Term Life",
+      "type": "Term Life",
+      "class_name": "Preferred"
+    }
+  ],
+  "risk_factors": [
+    {
+      "id": "rf_001",
+      "name": "Type 2 Diabetes",
+      "category": "chronic_condition",
+      "controlled": true
+    },
+    {
+      "id": "rf_002",
+      "name": "No Tobacco Use",
+      "category": "lifestyle",
+      "favorable": true
+    },
+    {
+      "id": "rf_003",
+      "name": "Controlled A1C",
+      "category": "lab_marker",
+      "controlled": true
+    }
+  ],
+  "lab_results": [
+    {
+      "id": "lab_001",
+      "test_name": "A1C",
+      "value": 6.8,
+      "unit": "%",
+      "reference_range": "below 7.0 is controlled"
+    }
+  ],
+  "underwriting_rules": [
+    {
+      "id": "rule_001",
+      "title": "Preferred Class Chronic Condition Requirement",
+      "text": "Preferred class requires no major uncontrolled chronic conditions.",
+      "decision": "REFER_IF_UNCONTROLLED"
+    },
+    {
+      "id": "rule_002",
+      "title": "Controlled Diabetes Review",
+      "text": "Controlled Type 2 Diabetes with A1C below 7.0 may be referred for underwriting review.",
+      "decision": "REFER_FOR_REVIEW"
+    },
+    {
+      "id": "rule_003",
+      "title": "Tobacco Use Classification",
+      "text": "No tobacco use improves risk profile and supports Preferred classification.",
+      "decision": "APPROVE_FACTOR"
+    },
+    {
+      "id": "rule_004",
+      "title": "Age and Diabetes Additional Review",
+      "text": "Applicants over age 45 with diabetes require additional underwriting review.",
+      "decision": "REQUIRE_ADDITIONAL_REVIEW"
+    }
+  ],
+  "document_chunks": [
+    {
+      "id": "chunk_001",
+      "source": "Underwriting Manual v3.2, Section 4.1",
+      "text": "Applicants applying for Preferred class coverage must not present with major uncontrolled chronic conditions. Controlled conditions documented with lab evidence may still qualify with underwriter discretion."
+    },
+    {
+      "id": "chunk_002",
+      "source": "Underwriting Manual v3.2, Section 6.3",
+      "text": "Type 2 Diabetes is assessed based on glycemic control. An A1C below 7.0% is considered controlled. Applicants with controlled diabetes may be referred for standard or preferred review depending on other risk factors."
+    },
+    {
+      "id": "chunk_003",
+      "source": "Underwriting Manual v3.2, Section 9.1",
+      "text": "Tobacco use within the last 12 months disqualifies applicants from Preferred classification. Non-tobacco users receive a favorable risk adjustment in the overall underwriting score."
+    },
+    {
+      "id": "chunk_004",
+      "source": "Underwriting Manual v3.2, Section 6.5",
+      "text": "Applicants aged 45 or older presenting with a diagnosis of Type 2 Diabetes must undergo a full additional medical review including current medication, most recent A1C, and BMI assessment."
+    }
+  ],
+  "relationships": {
+    "applies_for": [
+      {"applicant_id": "applicant_001", "policy_id": "policy_001"}
+    ],
+    "has_condition": [
+      {"applicant_id": "applicant_001", "risk_factor_id": "rf_001"},
+      {"applicant_id": "applicant_001", "risk_factor_id": "rf_002"},
+      {"applicant_id": "applicant_001", "risk_factor_id": "rf_003"}
+    ],
+    "has_lab_result": [
+      {"applicant_id": "applicant_001", "lab_result_id": "lab_001"}
+    ],
+    "has_rule": [
+      {"policy_id": "policy_001", "rule_id": "rule_001"},
+      {"policy_id": "policy_001", "rule_id": "rule_002"},
+      {"policy_id": "policy_001", "rule_id": "rule_003"},
+      {"policy_id": "policy_001", "rule_id": "rule_004"}
+    ],
+    "supported_by": [
+      {"rule_id": "rule_001", "chunk_id": "chunk_001"},
+      {"rule_id": "rule_002", "chunk_id": "chunk_002"},
+      {"rule_id": "rule_003", "chunk_id": "chunk_003"},
+      {"rule_id": "rule_004", "chunk_id": "chunk_004"}
+    ],
+    "evaluated_by": [
+      {"risk_factor_id": "rf_001", "rule_id": "rule_002"},
+      {"risk_factor_id": "rf_001", "rule_id": "rule_004"},
+      {"risk_factor_id": "rf_002", "rule_id": "rule_003"},
+      {"risk_factor_id": "rf_003", "rule_id": "rule_002"}
+    ]
+  }
+}

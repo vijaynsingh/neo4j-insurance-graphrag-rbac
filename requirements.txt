@@ -1,0 +1,6 @@
+neo4j
+python-dotenv
+fastapi
+uvicorn
+openai
+aiofiles

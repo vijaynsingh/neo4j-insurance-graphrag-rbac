@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+
+  <!-- Background — matches app header #0f172a -->
+  <rect width="64" height="64" rx="12" fill="#0f172a"/>
+
+  <!-- Cross-edges between satellite nodes -->
+  <line x1="15" y1="15" x2="49" y2="15" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+  <line x1="15" y1="49" x2="49" y2="49" stroke="#3b82f6" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Spoke-edges from central hub to satellite nodes -->
+  <line x1="32" y1="32" x2="15" y2="15" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="49" y2="15" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="15" y2="49" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round"/>
+  <line x1="32" y1="32" x2="49" y2="49" stroke="#60a5fa" stroke-width="2.5" stroke-linecap="round"/>
+
+  <!-- Satellite nodes — top pair brighter, bottom pair slightly muted -->
+  <circle cx="15" cy="15" r="6.5" fill="#2563eb"/>
+  <circle cx="49" cy="15" r="6.5" fill="#2563eb"/>
+  <circle cx="15" cy="49" r="5.5" fill="#3b82f6"/>
+  <circle cx="49" cy="49" r="5.5" fill="#3b82f6"/>
+
+  <!-- Central hub — dark ring + accent fill + white center -->
+  <circle cx="32" cy="32" r="11"  fill="#1e3a6e" opacity="0.7"/>
+  <circle cx="32" cy="32" r="9"   fill="#2563eb"/>
+  <circle cx="32" cy="32" r="4.5" fill="white"/>
+
+</svg>

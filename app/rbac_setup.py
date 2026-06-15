@@ -195,7 +195,7 @@ def main() -> None:
     print("  uw_manager   →  + James Hartford, Victoria Ashworth      (+ Confidential)")
     print("\nVerify with (see instructions below):")
     print("  docker exec -it neo4j-insurance-graphrag-rbac \\")
-    print("    cypher-shell -u uw_standard -p demo -d neo4j \\")
+    print("    cypher-shell -u uw_standard -p demo1234 -d neo4j \\")
     print('    "MATCH (a:Applicant) RETURN a.name, a.sensitivity ORDER BY a.name;"')
     print("\n(demo passwords are 'demo1234' — Neo4j requires ≥ 8 characters)")
 

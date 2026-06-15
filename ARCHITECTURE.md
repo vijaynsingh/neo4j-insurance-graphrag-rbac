@@ -102,12 +102,18 @@ API Response
 
 | Label | Purpose | Key properties |
 | --- | --- | --- |
-| `Applicant` | Person applying for coverage | `name`, `age` |
+| `Applicant` | Person applying for coverage | `name`, `age`, `sensitivity` (+ one tier label) |
 | `Policy` | Insurance product | `name`, `type`, `class_name` |
 | `RiskFactor` | Medical or lifestyle condition | `name`, `category`, `controlled` |
 | `LabResult` | Raw lab measurement | `test_name`, `value`, `unit` |
 | `UnderwritingRule` | Decision rule from the underwriting manual | `title`, `text`, `decision` |
 | `DocumentChunk` | Source text passage with vector embedding | `source`, `text`, `embedding` |
+
+Each `Applicant` additionally carries a **sensitivity-tier label** — `:Standard`,
+`:Restricted`, or `:Confidential` — alongside the base `:Applicant` label (e.g.
+`(:Applicant:Confidential)`). This second label is the element that role-based access
+control is enforced on; see the [RBAC Enforcement](#rbac-enforcement-design) section
+below and [RBAC.md](RBAC.md).
 
 ### Relationship types
 
@@ -397,6 +403,94 @@ reasoning chain.
 
 ---
 
+## RBAC Enforcement Design
+
+Role-based access control is a **cross-cutting** concern: it applies to every retrieval
+strategy at once, because it is enforced below all of them — at the Neo4j storage layer.
+
+### Tier labels as the access boundary
+
+Each `Applicant` carries a sensitivity tier as a second node label
+(`:Standard` / `:Restricted` / `:Confidential`). Labels — not properties — are the unit
+Neo4j's privilege system operates on, which is why the tier is modeled as a label.
+(It is *also* stored as a `sensitivity` property, purely for display and ad-hoc
+querying; the property has no role in enforcement.)
+
+A note on safe label assignment: Cypher cannot parameterize a label
+(`SET n:$label` is invalid). The seed assigns the tier label via a small **allowlist
+lookup** (`_SENSITIVITY_LABELS`) so no arbitrary string is ever interpolated into the
+query — preventing label injection.
+
+### Roles and the grant/deny model
+
+Three roles map to three Neo4j users. Each role is granted full graph read (database
+access, node visibility + properties, relationship traversal + properties), then
+**denied** the tiers above its clearance. The grant block runs identically for all
+three roles; only the denies differ:
+
+```cypher
+// per role — full read:
+GRANT ACCESS   ON DATABASE neo4j              TO <role>;
+GRANT MATCH {*} ON GRAPH neo4j NODES *         TO <role>;
+GRANT TRAVERSE ON GRAPH neo4j RELATIONSHIPS * TO <role>;
+GRANT READ {*} ON GRAPH neo4j RELATIONSHIPS * TO <role>;
+
+// per-role denies — DENY TRAVERSE + DENY READ {*} on each tier label:
+// underwriter (Standard only):
+DENY TRAVERSE ON GRAPH neo4j NODES Restricted   TO underwriter;
+DENY READ {*} ON GRAPH neo4j NODES Restricted   TO underwriter;
+DENY TRAVERSE ON GRAPH neo4j NODES Confidential  TO underwriter;
+DENY READ {*} ON GRAPH neo4j NODES Confidential  TO underwriter;
+// senior_underwriter (Standard + Restricted):
+DENY TRAVERSE ON GRAPH neo4j NODES Confidential  TO senior_underwriter;
+DENY READ {*} ON GRAPH neo4j NODES Confidential  TO senior_underwriter;
+// underwriting_manager: no denials
+```
+
+(`MATCH {*}` is `TRAVERSE` + `READ {*}` combined. Each tier label is denied with a
+`DENY TRAVERSE` *and* a `DENY READ {*}` as defense-in-depth — `DENY TRAVERSE` hides the
+node from `MATCH`, `DENY READ {*}` removes property access.)
+
+Neo4j evaluates **DENY before GRANT** across all roles a user holds (including
+`PUBLIC`). A node with a denied label is invisible to that session — absent from
+`MATCH` results, and unreachable through relationships. The non-applicant nodes carry
+no tier label, so the underwriting *knowledge* (rules, chunks, policies) stays fully
+readable; only *which applicants* are visible changes by role. Setup is scripted and
+idempotent in `app/rbac_setup.py`.
+
+### Why no pipeline changes are required
+
+The GraphRAG traversal walks
+`DocumentChunk → UnderwritingRule → RiskFactor → Applicant`. Because enforcement holds
+across relationship hops, a denied applicant is simply never reached — the traversal
+returns no rows for it. The retrieval logic does not know tiers exist; the engine does
+the filtering. This is the architectural payoff: **one enforcement mechanism, applied
+once, covers GraphRAG and Text2Cypher identically.**
+
+### Application wiring — per-role driver pool
+
+The role arrives on each `/ask` request (default `underwriting_manager` for backward
+compatibility). At startup, `main.py` creates one pooled Neo4j driver per role user,
+verified via `verify_connectivity()` and cached in `app.state`. Each request resolves
+its role to the matching scoped driver (O(1) lookup) and executes **both** retrieval
+phases — vector query and graph traversal — on that connection. The
+`run_with_driver()` methods on `GraphRAGPipeline` and `Text2CypherService` accept the
+scoped driver so the same pipeline code runs under any role.
+
+```
+request.role  →  RBAC_ROLE_MAP[role]  →  rbac_drivers[role]  →  both retrieval phases
+                                                                 run as the scoped user
+```
+
+This is the demo-appropriate choice (one user per role makes the security model
+visible). The production alternative is impersonation (`EXECUTE AS`) over a single
+pooled admin connection, or deriving the role from an authenticated SSO/JWT session —
+the label-based `DENY` model underneath is identical. Full walkthrough and the two
+demonstrations (VIP-question traversal scoping, and Text2Cypher defense-in-depth) are
+in [RBAC.md](RBAC.md).
+
+---
+
 ## Embedding Providers
 
 Both providers implement the same interface:
@@ -478,24 +572,45 @@ The API (`/ask`, `/health`) is the primary surface. The UI is optional scaffoldi
 
 ## API Layer
 
-### Lifespan — one driver, multiple pipelines, one lock
+### Lifespan — admin driver, per-role driver pool, multiple pipelines, one lock
 
 ```python
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    driver = get_driver()                              # opened once at startup
+    driver = get_driver()                              # admin driver, opened once
     app.state.driver = driver
     app.state.reseed_lock = asyncio.Lock()             # prevents concurrent re-indexes
     app.state.pipelines = {
-        "demo":   GraphRAGPipeline.for_mode(driver, "demo"),
-        "openai": GraphRAGPipeline.for_mode(driver, "openai"),  # only if OPENAI_API_KEY set
+        "demo": GraphRAGPipeline.for_mode(driver, "demo"),
     }
-    if OPENAI_API_KEY:
+    if OPENAI_API_KEY:                                 # openai pipeline + auto stack
+        app.state.pipelines["openai"] = GraphRAGPipeline.for_mode(driver, "openai")
         app.state.t2c_service      = Text2CypherService(driver)
         app.state.auto_router      = RetrievalRouter()
         app.state.auto_synthesizer = HybridSynthesizer()
+    # one pooled driver per RBAC role-user (O(1) lookup per request)
+    app.state.rbac_drivers = {}
+    for role, user in RBAC_ROLE_MAP.items():
+        try:
+            d = get_rbac_driver(user, RBAC_USER_PASSWORD)
+            d.verify_connectivity()
+            app.state.rbac_drivers[role] = d
+        except Exception:
+            # warn but keep starting; a missing role driver yields a 503 at request time
+            print(f"WARNING: could not connect RBAC user for role '{role}' — run app.rbac_setup")
     yield
-    driver.close()                                     # closed cleanly at shutdown
+    for d in app.state.rbac_drivers.values():
+        d.close()
+    driver.close()                                     # all drivers closed at shutdown
+```
+
+The admin driver handles seeding and non-scoped operations. The per-role drivers are
+created once at startup (not per request); each `/ask` resolves its role to the matching
+scoped driver, which executes both retrieval phases as that role's Neo4j user. If a
+role-user can't be authenticated at startup (e.g. `rbac_setup` was never run), startup
+prints a warning and continues — that role simply has no entry in `rbac_drivers`, and a
+request using it returns HTTP 503 from `_get_scoped_driver()`. (A stricter deployment
+could choose to fail startup instead.)
 ```
 
 The Neo4j driver maintains an internal connection pool. Opening it once and sharing across requests
@@ -526,18 +641,20 @@ lock and skips the re-index because it is already complete.
   "supporting_rules": [{"id": "...", "title": "...", "decision": "..."}],
   "risk_factors": [{"name": "...", "category": "..."}],
   "citations": [
-    {"type": "DocumentChunk",    "source": "...", "relevance_score": 0.506},
+    {"type": "DocumentChunk",    "source": "...", "relevance_score": 0.823},
     {"type": "UnderwritingRule", "title": "...",  "decision": "..."}
   ],
   "retrieval_summary": {
     "matched_chunks": 3,
     "rules": 3,
     "risk_factors": 3,
-    "policies": 1,
-    "applicants": 1
+    "policies": 2,
+    "applicants": 4
   },
   "embedding_provider": "text-embedding-3-small",
   "llm_provider": "OpenAILLM",
+  "role": "underwriting_manager",
+  "rbac_user": "uw_manager",
   "compatibility_warning": null,
   "reindexed": false,
   "matched_chunks": [{"id": "chunk_001", "source": "Underwriting Manual v3.2", "text": "...", "score": 0.93}],
@@ -546,7 +663,7 @@ lock and skips the re-index because it is already complete.
   "raw_query_results": [{"rf.name": "Type 2 Diabetes"}, {"rf.name": "Controlled A1C"}],
   "selected_strategy": "hybrid",
   "router_reason": "The question requires both specific entity data and semantic rule interpretation.",
-  "retrieval_strategy": null
+  "retrieval_strategy": "Hybrid"
 }
 ```
 
@@ -559,6 +676,7 @@ Field notes:
 - `generated_cypher` / `raw_query_results` — present whenever Text2Cypher retrieval participates in the response (Text2Cypher Mode, Auto Mode with `text2cypher` strategy, or Auto Mode with `hybrid` strategy); null or empty otherwise
 - `selected_strategy` / `router_reason` — present for `auto` mode only; null for all other modes
 - `retrieval_strategy` — `null` for Learning Mode and OpenAI Mode; set for Text2Cypher Mode (`"Text2Cypher"`) and all Auto Mode paths (`"openai_graph"`, `"text2cypher"`, or `"Hybrid"` depending on the router decision)
+- `role` / `rbac_user` — the active access role on the request (default `underwriting_manager`) and the Neo4j user it resolved to (`uw_manager`); present on every response and reflects which tier scoping was applied
 
 ---
 
@@ -664,8 +782,11 @@ updating:
    Mode therefore validates the retrieval architecture and response contract, while OpenAI Mode
    provides production-style reasoning over the same graph context.
 
-3. **Single-applicant seed data.** The seed data models one applicant (John Smith, age 48) with four
-   underwriting rules. Multi-applicant retrieval (e.g., "which of our applicants need additional
-   review?") is valid in the graph model but not exercised by the current seed data.
+3. **Demonstration-scale seed data.** The seed models 6 applicants across 3
+   sensitivity tiers, with 3 policies, 11 risk factors, 7 lab results, 12 underwriting
+   rules, and 12 document chunks — enough to exercise multi-applicant retrieval, the
+   four retrieval modes, and the three RBAC roles. It is a curated demonstration
+   dataset, not production volume; a production deployment would carry many thousands
+   of applicants and a far larger underwriting manual corpus.
 
 4. **No authentication.** The API is unauthenticated. See Production Considerations above.

@@ -17,14 +17,25 @@ ORDER BY count DESC
 
 **Expected output:**
 
+Because each applicant carries two labels (`:Applicant` plus its tier), `labels(n)`
+groups applicants by their full label-set — so applicants appear as three separate
+rows of 2, not one row of 6:
+
 | label | count |
 |---|---|
-| UnderwritingRule | 4 |
-| DocumentChunk | 4 |
-| RiskFactor | 3 |
-| Applicant | 1 |
-| Policy | 1 |
-| LabResult | 1 |
+| `["UnderwritingRule"]` | 12 |
+| `["DocumentChunk"]` | 12 |
+| `["RiskFactor"]` | 11 |
+| `["LabResult"]` | 7 |
+| `["Policy"]` | 3 |
+| `["Applicant","Standard"]` | 2 |
+| `["Applicant","Restricted"]` | 2 |
+| `["Applicant","Confidential"]` | 2 |
+
+That is 8 rows totalling 6 applicants + 3 policies + 11 risk factors + 7 lab results +
+12 rules + 12 chunks. The tier split in the applicant rows is itself a quick visual
+confirmation that the RBAC tier labels are applied. To count applicants as a single
+group regardless of tier, query `MATCH (a:Applicant) RETURN count(a)` instead.
 
 ---
 
@@ -69,7 +80,9 @@ RETURN
 ORDER BY r.id
 ```
 
-**Expected:** 4 rules, each with a different decision outcome.
+**Expected:** 13 rows total — `policy_001` and `policy_002` each link to 5 rules and
+`policy_003` to 3, across a range of decision outcomes. (To see the rules for a single
+policy, add a filter such as `WHERE p.name = "Preferred Term Life"`.)
 
 ---
 
@@ -212,7 +225,7 @@ RETURN
 ORDER BY n.id
 ```
 
-**Expected:** 4 rows, each with `embedding_dimensions = 1536`.
+**Expected:** 12 rows, each with `embedding_dimensions = 1536`.
 
 `first_value` and `last_value` should be small floats (e.g., `-0.024`, `0.019`).
 These are normalized — the sum of squares of all 1536 values equals 1.0.
@@ -254,9 +267,9 @@ ORDER BY score DESC
 
 **Expected:**
 - `chunk_002` returns first with score = `1.0` (exact match with itself)
-- The other 3 chunks return with scores < 1.0
+- The other chunks return with scores < 1.0
 
-**NOTE:** With mock embeddings (Learning Mode), the relative scores of the other 3 chunks have no
+**NOTE:** With mock embeddings (Learning Mode), the relative scores of the other chunks have no
 semantic meaning — they reflect hash proximity. When using OpenAI Mode with
 text-embedding-3-small, top results reflect semantic similarity.
 
@@ -294,7 +307,7 @@ RETURN
 ORDER BY d.id
 ```
 
-**Expected:** 4 rows — each chunk maps to exactly one rule.
+**Expected:** 12 rows — each of the 12 document chunks maps to the underwriting rule it supports.
 
 **Why this hop matters:** The vector search finds chunks by semantic similarity to the
 question. But chunks alone are just text. Walking to the UnderwritingRule gives us the
@@ -318,8 +331,8 @@ RETURN
 ORDER BY rf.name
 ```
 
-**Expected:** 4 rows (some risk factors appear in multiple rules — e.g., Type 2 Diabetes
-is evaluated by both `rule_002` and `rule_004`).
+**Expected:** 14 rows (some risk factors are evaluated by more than one rule — e.g.
+Type 2 Diabetes is evaluated by both the controlled-diabetes and the age-and-diabetes rules).
 
 **Why this hop matters:** Pure vector search on "diabetes underwriting rule" retrieves
 text chunks. The graph hop tells us specifically which applicant conditions are governed
@@ -344,7 +357,10 @@ RETURN
 ORDER BY r.id
 ```
 
-**Expected:** 4 rows (one per rule — John Smith, age 48, Preferred Term Life, each rule, each source).
+**Expected:** 26 rows. The query has no applicant filter, so it spans all 6 applicants
+across their policies and rules: `(2 applicants × 5 rules)` for policy_001 +
+`(2 × 5)` for policy_002 + `(2 × 3)` for policy_003 = 26. To scope to one applicant,
+add `WHERE a.name = "John Smith"`.
 
 **Why this matters for GraphRAG:**
 This single Cypher query replaces what would require:
@@ -430,3 +446,103 @@ LIMIT 25
 **Expected:** 1 row — the Policy node linked to John Smith via `APPLIES_FOR`, showing product name,
 type, and underwriting class. This is a structured lookup that Text2Cypher handles precisely where
 vector search would return semantically similar — but not necessarily correct — results.
+
+---
+
+## RBAC Validation Queries
+
+These queries verify the role-based access control layer. The first group runs as the
+Neo4j **admin** user (to inspect the roles themselves); the second group connects as
+each **role user** to prove the access scoping. See [RBAC.md](RBAC.md) for the full design.
+
+### Query R1 — Confirm Enterprise Edition
+
+RBAC requires Neo4j Enterprise. This should return `enterprise`.
+
+```cypher
+CALL dbms.components() YIELD edition RETURN edition;
+```
+
+### Query R2 — List roles and users
+
+```cypher
+SHOW ROLES;
+SHOW USERS;
+```
+
+**Expected roles include:** `underwriter`, `senior_underwriter`, `underwriting_manager`
+(alongside the built-in roles). **Expected users:** `uw_standard`, `uw_senior`,
+`uw_manager` (alongside `neo4j`).
+
+### Query R3 — Inspect the privileges granted to a role
+
+```cypher
+SHOW ROLE underwriter PRIVILEGES AS COMMANDS;
+```
+
+**Expected:** the full-read grants (`GRANT ACCESS` on the database, `GRANT MATCH {*}`
+on `NODES *`, and `GRANT TRAVERSE` + `GRANT READ {*}` on `RELATIONSHIPS *`), plus
+`DENY TRAVERSE` and `DENY READ {*}` on the `Restricted` and `Confidential` labels.
+
+### Query R4 — Tiers on applicant nodes
+
+```cypher
+MATCH (a:Applicant)
+RETURN a.name AS applicant, a.sensitivity AS tier, labels(a) AS labels
+ORDER BY a.sensitivity, a.name;
+```
+
+**Expected:** 6 rows; each applicant has two labels (e.g. `["Applicant","Standard"]`)
+and a matching `sensitivity` property.
+
+---
+
+### Connecting as each role to prove scoping
+
+Run these from a shell — each connects as a different Neo4j role user. The **same
+query** returns a different number of applicants per role.
+
+```bash
+# Underwriter — 2 applicants (Standard only)
+docker exec -it neo4j-insurance-graphrag-rbac cypher-shell -u uw_standard -p demo1234 \
+  "MATCH (a:Applicant) RETURN a.name, a.sensitivity ORDER BY a.name;"
+
+# Senior Underwriter — 4 applicants (+ Restricted)
+docker exec -it neo4j-insurance-graphrag-rbac cypher-shell -u uw_senior -p demo1234 \
+  "MATCH (a:Applicant) RETURN a.name, a.sensitivity ORDER BY a.name;"
+
+# Underwriting Manager — all 6 applicants
+docker exec -it neo4j-insurance-graphrag-rbac cypher-shell -u uw_manager -p demo1234 \
+  "MATCH (a:Applicant) RETURN a.name, a.sensitivity ORDER BY a.name;"
+```
+
+### Query R5 — Enforcement survives traversal
+
+The key property: scoping holds even when applicants are reached *through* other nodes.
+Run this as `uw_standard` — it starts from `Policy` and walks into `Applicant`, yet still
+returns only the two Standard-tier applicants.
+
+```cypher
+MATCH (p:Policy)<-[:APPLIES_FOR]-(a:Applicant)
+RETURN p.name AS policy, a.name AS applicant
+ORDER BY a.name;
+```
+
+**Expected (as `uw_standard`):** only John Smith and Maria Garcia, even though
+confidential applicants also hold policies. This is why the GraphRAG pipeline — which
+traverses into applicants from matched chunks — is scoped automatically, with no
+pipeline changes.
+
+### Query R6 — Defense-in-depth: same generated query, different results
+
+This mirrors what Text2Cypher executes. Run the identical query as different role users;
+the row count differs because the engine filters, not the query.
+
+```cypher
+MATCH (a:Applicant)-[:APPLIES_FOR]->(p:Policy)
+RETURN a.name AS applicant_name, p.type AS policy_type
+LIMIT 25;
+```
+
+**Expected:** 2 rows as `uw_standard`, 4 as `uw_senior`, 6 as `uw_manager` — same
+Cypher, role-scoped results.

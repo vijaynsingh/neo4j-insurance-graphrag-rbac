@@ -1,13 +1,21 @@
-# Neo4j Insurance GraphRAG
+# Neo4j Insurance GraphRAG — with Role-Based Access Control
 
 A reference implementation demonstrating Graph-augmented Retrieval (GraphRAG) for insurance
-underwriting using Neo4j, vector search, and multiple retrieval strategies over a shared knowledge graph.
+underwriting using Neo4j, vector search, and multiple retrieval strategies over a shared knowledge graph —
+extended with **native Neo4j role-based access control** that scopes retrieval by data sensitivity tier.
 
-**Stack:** Neo4j 5 · Python 3.11 · FastAPI · OpenAI · Neo4j Vector Indexes · Custom GraphRAG Pipeline
+**Stack:** Neo4j 5 **Enterprise** · Python 3.11 · FastAPI · OpenAI · Neo4j Vector Indexes · Native RBAC · Custom GraphRAG Pipeline
 
-> **Four modes, one graph.**
+> **This repository extends [neo4j-insurance-graphrag](https://github.com/vijaynsingh/neo4j-insurance-graphrag).**
+> The original runs four retrieval modes on Neo4j Community Edition. This version adds
+> role-based access control on top — three underwriting roles see three different slices
+> of the applicant data, enforced by the Neo4j engine itself. See **[RBAC.md](RBAC.md)** for the
+> full access-control design, and the [edition note](#why-enterprise-edition) below for why
+> this moved from Community to Enterprise.
+
+> **Four modes, one graph — now role-secured.**
 >
-> This project demonstrates how multiple retrieval strategies can operate against the same Neo4j knowledge graph while sharing a common API contract and domain model.
+> This project demonstrates how multiple retrieval strategies can operate against the same Neo4j knowledge graph while sharing a common API contract and domain model — and how a single, database-enforced access-control layer scopes all of them at once.
 >
 > - **Learning Mode** — Mock embeddings and deterministic business logic. Runs completely offline with zero API cost.
 > - **OpenAI Mode** — Uses `text-embedding-3-small` embeddings and `gpt-4o` reasoning while preserving the same graph model and response structure.
@@ -19,6 +27,8 @@ underwriting using Neo4j, vector search, and multiple retrieval strategies over 
 >   - `hybrid` — GraphRAG and Text2Cypher executed in parallel with answer synthesis
 >
 > The router's decision (`selected_strategy`) and explanation (`router_reason`) are returned in the API response for full transparency.
+>
+> - **Role-Based Access Control (all modes)** — three underwriting roles (Underwriter, Senior Underwriter, Underwriting Manager) see three different tiers of applicant data (Standard, Restricted, Confidential). Enforcement is native Neo4j RBAC at the storage layer, so it applies identically across all four retrieval modes with no per-mode logic. See **[RBAC.md](RBAC.md)**.
 
 ---
 
@@ -97,14 +107,57 @@ In regulated industries, the ability to reproduce *exactly* what the system saw 
 
 ---
 
+## Why Enterprise Edition
+
+The base project runs on Neo4j Community Edition. Adding role-based access control
+required moving to **Neo4j 5 Enterprise**, because fine-grained security — roles,
+privileges, and sub-graph access control — is an Enterprise capability. Community
+Edition has no `CREATE ROLE`, no `GRANT`/`DENY` on graph elements, and a single user.
+
+This is the same community-to-enterprise path many real deployments follow: start on
+Community to model the domain and prove the pipeline, then graduate to Enterprise once
+security, access control, or clustering requirements appear. This repository runs on
+the **30-day Enterprise evaluation license** (`NEO4J_ACCEPT_LICENSE_AGREEMENT=eval`).
+
+---
+
+## Role-Based Access Control
+
+Insurance underwriting is a domain where not every underwriter should see every
+applicant — high-net-worth and VIP cases are routinely restricted to senior staff.
+This project models that with three sensitivity tiers and three roles:
+
+| Role | Neo4j user | Sees tiers | Applicants visible |
+|---|---|---|---|
+| Underwriter | `uw_standard` | Standard | 2 |
+| Senior Underwriter | `uw_senior` | Standard + Restricted | 4 |
+| Underwriting Manager | `uw_manager` | Standard + Restricted + Confidential | 6 |
+
+Each applicant carries a tier as a **second node label** (`:Applicant:Confidential`),
+and roles are `DENY TRAVERSE`-d from the tiers above their clearance. Because Neo4j
+enforces this at the **storage layer**, the same access boundary applies to every
+retrieval mode — GraphRAG traversal and Text2Cypher alike — with no changes to the
+pipeline logic. A restricted applicant simply never appears in any result, traversal,
+or LLM context for a role that lacks clearance.
+
+The application exposes a per-request **role selector** alongside the mode selector;
+the same question asked by different roles returns different scoped results, live.
+
+**See [RBAC.md](RBAC.md) for the full design**, including the grant/deny model, the
+database-layer verification, and the two demonstrations (VIP-question traversal
+scoping, and Text2Cypher defense-in-depth where an identical generated query returns
+different rows per role).
+
+---
+
 ## Architecture
 
 ```text
-POST /ask  {"question": "...", "mode": "demo"|"openai"|"text2cypher"|"auto"}
+POST /ask  {"question": "...", "mode": "demo"|"openai"|"text2cypher"|"auto", "role"?: "underwriter"|"senior_underwriter"|"underwriting_manager"}
       │
       ▼
 FastAPI  app/main.py
-      │  (lifespan: one Neo4j driver, pipelines for available modes, asyncio.Lock)
+      │  (lifespan: 1 admin + 3 per-role RBAC drivers, pipelines for available modes, asyncio.Lock)
       │
       ├── Auto-reindex (if stored embedding model ≠ requested mode's provider)
       │     reindex_embeddings(driver, provider)  ← vectors only, graph unchanged
@@ -164,9 +217,18 @@ Retrieval strategy should match question type:
 (UnderwritingRule)-[:SUPPORTED_BY]→ (DocumentChunk)  ← embeddings live here
 ```
 
+Each `Applicant` also carries a **sensitivity tier as a second label** —
+`:Standard`, `:Restricted`, or `:Confidential` — which is the boundary that
+role-based access control is enforced on (see [RBAC.md](RBAC.md)).
+
 DocumentChunk nodes carry vector embeddings. UnderwritingRule nodes carry structured
 decision logic. The graph connects them: vector search finds the chunk, traversal finds
 the rule, rule links to the risk factor and applicant. No single text chunk contains all of this.
+
+![Knowledge graph schema](docs/images/neo4j-insurance-graph_model_schema.png)
+
+The seed data contains **6 applicants** (2 per tier), 3 policies, 11 risk factors,
+7 lab results, 12 underwriting rules, and 12 document chunks.
 
 ---
 
@@ -234,81 +296,105 @@ Pass `"mode": "auto"` in the request body.
 
 ### Knowledge Graph Model
 
-![Knowledge Graph Model](docs/images/08-graph-model.png)
+![Knowledge Graph Model](docs/images/10-schema-visualization.png)
 
-Neo4j graph model representing applicants, policies, risk factors, underwriting rules, and document chunks.
+Neo4j graph model representing applicants (with sensitivity-tier labels), policies, risk factors, underwriting rules, and document chunks.
 
 ---
 
 ### Application Home Page
 
-![Application Home Page](docs/images/01-home-page.png)
+![Application Home Page](docs/images/01-home.png)
 
-Unified interface supporting Learning Mode, OpenAI Mode, Text2Cypher Mode, and Auto Mode.
+Unified interface with a retrieval-mode selector (Learning · OpenAI · Text2Cypher · Auto) and an access-role selector (Underwriter · Senior Underwriter · Underwriting Manager).
 
 ---
 
-### GraphRAG Retrieval
+### GraphRAG Retrieval — Phase 1 (Vector Search)
 
-![GraphRAG Retrieval](docs/images/02-graphrag-retrieval.png)
+![GraphRAG Vector Search](docs/images/02-graphrag-phase1-vector.png)
 
-Vector similarity search retrieves relevant document chunks and expands context through graph traversal.
+Vector similarity search retrieves the most relevant document chunks from Neo4j's HNSW index.
+
+---
+
+### GraphRAG Retrieval — Phase 2 (Graph Traversal)
+
+![GraphRAG Graph Traversal](docs/images/03-graphrag-phase2-traversal.png)
+
+Traversal expands outward from the matched chunks to assemble applicants, policies, risk factors, and rules.
 
 ---
 
 ### GraphRAG Decision and Citations
 
-![GraphRAG Decision and Citations](docs/images/03-graphrag-decision.png)
+![GraphRAG Decision and Citations](docs/images/04-graphrag-decision-citations.png)
 
-Decision generation, reasoning, and explainable citations derived from graph context.
+Decision, reasoning, and explainable citations — every statement traces to a specific graph node.
 
 ---
 
 ### Text2Cypher Retrieval
 
-![Text2Cypher Retrieval](docs/images/04-text2cypher.png)
+![Text2Cypher Retrieval](docs/images/06-text2cypher-result.png)
 
-Natural language is translated into Cypher, executed against Neo4j, and synthesized into a user-friendly answer.
-
----
-
-### Auto Router — OpenAI GraphRAG
-
-![Auto Router — OpenAI GraphRAG](docs/images/05-auto-router-openai.png)
-
-Router selects openai_graph for semantic and policy interpretation questions.
+Natural language is translated into Cypher, executed against Neo4j, and synthesized into an answer.
 
 ---
 
-### Auto Router — Text2Cypher
+### Auto Router — GraphRAG / Text2Cypher / Hybrid
 
-![Auto Router — Text2Cypher](docs/images/06-auto-router-text2cypher.png)
+![Auto Router — GraphRAG](docs/images/07-auto-router-graphrag.png)
 
-Router selects text2cypher for structured graph lookup questions.
+Router selects `openai_graph` for semantic and policy-interpretation questions.
+
+![Auto Router — Text2Cypher](docs/images/08-auto-router-text2cypher.png)
+
+Router selects `text2cypher` for structured lookup questions.
+
+![Auto Router — Hybrid](docs/images/09-auto-router-hybrid.png)
+
+Router selects `hybrid` when a question needs both structured graph facts and semantic reasoning.
 
 ---
 
-### Auto Router — Hybrid Retrieval
+### Role-Based Access Control
 
-![Auto Router — Hybrid Retrieval](docs/images/07-auto-router-hybrid.png)
+The same VIP question, asked by two different roles. **As Underwriter**, the confidential high-net-worth applicants are hidden:
 
-Router selects hybrid retrieval when both structured graph facts and semantic reasoning are required.
+![RBAC — VIP question as Underwriter](docs/images/13-rbac-vip-underwriter-result.png)
+
+**As Underwriting Manager**, the same question now surfaces James Hartford and Victoria Ashworth:
+
+![RBAC — VIP question as Manager](docs/images/15-rbac-vip-manager-result.png)
+
+Defense-in-depth: in Text2Cypher mode the LLM generates an *identical* unrestricted query for both roles, yet the database returns 2 rows for the Underwriter and 6 for the Manager — the engine enforces access, not the query.
+
+![RBAC — Text2Cypher as Underwriter, 2 rows](docs/images/17-rbac-t2c-underwriter-result.png)
+
+![RBAC — Text2Cypher as Manager, 6 rows](docs/images/19-rbac-t2c-manager-result.png)
+
+See **[RBAC.md](RBAC.md)** for the full walkthrough.
 
 ---
 
 ## How to Run
 
 ```bash
-docker compose up -d
+docker compose up -d           # starts Neo4j 5 Enterprise (evaluation license)
 pip install -r requirements.txt
-python3 -m app.seed          # initial graph setup only — run once
+python3 -m app.seed            # initial graph setup only — run once
+python3 -m app.rbac_setup      # create RBAC roles, users, and grants — run once
 uvicorn app.main:app --port 8765 --reload
 ```
 
 Then open <http://127.0.0.1:8765> in your browser for the interactive GraphRAG application.
 
-`python3 -m app.seed` is only needed once to populate the graph. Switching between Learning Mode and
-OpenAI Mode in the UI re-indexes embeddings automatically — no manual re-seed required.
+`python3 -m app.seed` populates the graph (6 applicants across 3 sensitivity tiers).
+`python3 -m app.rbac_setup` creates the three roles and demo users (`uw_standard` /
+`uw_senior` / `uw_manager`, password `demo1234`); it is idempotent and safe to re-run.
+Switching between Learning Mode and OpenAI Mode in the UI re-indexes embeddings
+automatically — no manual re-seed required.
 
 API docs (Swagger): <http://127.0.0.1:8765/docs>
 
@@ -323,6 +409,8 @@ The root URL (`/`) serves a single-page application that visualises every pipeli
 | Section | What it shows |
 | ------- | ------------- |
 | Mode selector | Four mode cards: Learning Mode · OpenAI Mode · Text2Cypher Mode · Auto Mode |
+| Role selector | Three access-role cards: Underwriter · Senior Underwriter · Underwriting Manager — scopes which applicant tiers are visible |
+| RBAC context bar (purple) | Active role and the tiers it can see (e.g. "Underwriter · Standard tier only · Restricted + Confidential clients hidden") |
 | Example question strips | Per-mode clickable pill buttons that fill the textarea — hidden for inactive modes |
 | Provider bar | Active mode, embedding model, and LLM; for Auto Mode shows Router and Selected strategy |
 | Router reason callout (blue, Auto Mode only) | Strategy badge + one-sentence explanation of the routing decision |
@@ -362,7 +450,17 @@ curl -X POST http://127.0.0.1:8765/ask \
 curl -X POST http://127.0.0.1:8765/ask \
   -H "Content-Type: application/json" \
   -d '{"question":"Based on John Smith'\''s profile and underwriting rules, what is your recommendation?","mode":"auto"}'
+
+# Role-scoped — the same question as an Underwriter (sees Standard tier only)
+curl -X POST http://127.0.0.1:8765/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How are high-value VIP policies over $5 million underwritten?","mode":"openai","role":"underwriter"}'
 ```
+
+The optional `role` field accepts `underwriter`, `senior_underwriter`, or
+`underwriting_manager`. When omitted it defaults to `underwriting_manager` (full
+access), preserving the original API contract. The response echoes the active `role`
+and resolved `rbac_user`. See [RBAC.md](RBAC.md).
 
 **Response:**
 
@@ -386,24 +484,30 @@ curl -X POST http://127.0.0.1:8765/ask \
     {"name": "No Tobacco Use",  "category": "lifestyle"}
   ],
   "citations": [
-    {"type": "DocumentChunk",    "source": "Underwriting Manual v3.2, Section 6.3", "relevance_score": 0.506},
-    {"type": "DocumentChunk",    "source": "Underwriting Manual v3.2, Section 6.5", "relevance_score": 0.513},
+    {"type": "DocumentChunk",    "source": "Underwriting Manual v3.2, Section 6.3", "relevance_score": 0.823},
+    {"type": "DocumentChunk",    "source": "Underwriting Manual v3.2, Section 4.1", "relevance_score": 0.781},
     {"type": "UnderwritingRule", "title": "Controlled Diabetes Review",              "decision": "REFER_FOR_REVIEW"}
   ],
   "retrieval_summary": {
     "matched_chunks": 3,
     "rules": 3,
     "risk_factors": 3,
-    "policies": 1,
-    "applicants": 1
+    "policies": 2,
+    "applicants": 4
   },
-  "mode": "demo",
-  "embedding_provider": "mock",
-  "llm_provider": "MockLLM",
+  "mode": "openai",
+  "embedding_provider": "text-embedding-3-small",
+  "llm_provider": "OpenAILLM",
+  "role": "underwriting_manager",
+  "rbac_user": "uw_manager",
   "compatibility_warning": null,
   "reindexed": false
 }
 ```
+
+> The `applicants` count reflects role scoping: the same question as an `underwriter`
+> would return fewer applicants, because restricted and confidential tiers are filtered
+> at the database. The generated query is unchanged — only the visible results differ.
 
 ---
 
@@ -460,7 +564,11 @@ The graph model, traversal queries, and API contract are identical across all mo
    performance scales logarithmically with data volume through Neo4j's HNSW index (O(log n) rather than O(n) linear scan).
 3. **Auth + observability** — add `Depends()` middleware for API key or JWT auth. Log
    `retrieval_summary` counts to detect retrieval quality drift over time.
-4. **Additional LLM providers** — add any new LLM class following the same interface as
+4. **RBAC in production** — this demo connects as one Neo4j user per role for clarity.
+   In production, keep a single pooled connection and use **impersonation** (`EXECUTE AS`),
+   or map the role from an authenticated SSO/JWT session, rather than a connection per role.
+   The access boundary itself (label-based `DENY TRAVERSE`) is unchanged. See [RBAC.md](RBAC.md).
+5. **Additional LLM providers** — add any new LLM class following the same interface as
    `MockLLM` and `OpenAILLM`. No pipeline changes required.
 
 ---
@@ -499,30 +607,37 @@ app/
   config.py               — Neo4j connection settings (dotenv)
   graph.py                — driver factory + run_query helper
   embed.py                — MockEmbeddingProvider (SHA-256) and OpenAIEmbeddingProvider (text-embedding-3-small)
-  seed.py                 — constraints, seed nodes/relationships, attach embeddings; reindex_embeddings() for auto mode switching
+  seed.py                 — constraints, seed nodes/relationships (6 applicants + tier labels), attach embeddings; reindex_embeddings() for auto mode switching
+  rbac_setup.py           — create RBAC roles, users, and label-based grants/denies (idempotent)
   vector_index.py         — create/verify HNSW vector index, similarity_search()
   graph_retriever.py      — GraphRetriever: two-phase vector + graph retrieval
   mock_llm.py             — MockLLM: deterministic underwriting decision logic
   openai_llm.py           — OpenAILLM: GPT-4o reasoning with structured JSON responses
-  graphrag_pipeline.py    — GraphRAGPipeline: retriever → LLM → structured answer
-  text2cypher_service.py  — Text2CypherService: NL → GPT-4o → Cypher → Neo4j → GPT-4o answer
+  graphrag_pipeline.py    — GraphRAGPipeline: retriever → LLM → structured answer; run_with_driver() for role-scoped execution
+  text2cypher_service.py  — Text2CypherService: NL → GPT-4o → Cypher → Neo4j → GPT-4o answer; run_with_driver() for role-scoped execution
   retrieval_router.py     — RetrievalRouter: GPT-4o classifies question, routes to openai_graph / text2cypher / hybrid
-  main.py                 — FastAPI app: POST /ask, GET /health, error handling
+  main.py                 — FastAPI app: POST /ask (with role), GET /health; pre-creates per-role driver pool
 data/
   underwriting_sample.json  — seed data source of truth (all nodes + relationships)
 docs/
   images/
-    01-home-page.png
-    02-graphrag-retrieval.png
-    03-graphrag-decision.png
-    04-text2cypher.png
-    05-auto-router-openai.png
-    06-auto-router-text2cypher.png
-    07-auto-router-hybrid.png
-    08-graph-model.png
-docker-compose.yml          — Neo4j 5 service with APOC plugin
+    01-home.png
+    02-graphrag-phase1-vector.png
+    03-graphrag-phase2-traversal.png
+    04-graphrag-decision-citations.png
+    05-text2cypher-setup.png
+    06-text2cypher-result.png
+    07-auto-router-graphrag.png
+    08-auto-router-text2cypher.png
+    09-auto-router-hybrid.png
+    10-schema-visualization.png
+    11-graph-applicant-detail.png
+    12-19 rbac-*.png         (VIP + Text2Cypher contrast pairs, per role)
+    neo4j-insurance-graph_model_schema.png
+docker-compose.yml          — Neo4j 5 Enterprise service (eval license) with APOC plugin
 requirements.txt            — Python dependencies
 README.md                   — project overview, architecture summary, setup instructions, screenshots, and usage guide
 ARCHITECTURE.md             — detailed design and implementation architecture
-CYPHER_QUERIES.md           — Cypher reference queries for GraphRAG and Text2Cypher validation
+RBAC.md                     — role-based access control design, enforcement, and demonstrations
+CYPHER_QUERIES.md           — Cypher reference queries for GraphRAG, Text2Cypher, and RBAC validation
 ```
